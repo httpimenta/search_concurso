@@ -1,0 +1,20 @@
+# Arquivos de ambiente do Streamlit e chaves de API
+.streamlit/
+secrets.toml
+.env
+
+# Bancos de dados locais SQLite
+*.db
+*.sqlite3
+
+# Arquivos de log gerados pela aplicação
+*.log
+
+# Arquivos de cache do Python e sistema (Mac/Windows)
+__pycache__/
+*.pyc
+.DS_Store
+.pytest_cache/
+
+# Ignora versões antigas e legadas do aplicativo
+old/
