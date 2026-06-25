@@ -3,10 +3,15 @@ Cliente MCP para comunicação com a API do PCI Concursos.
 Usa a estrutura real da API (confirmada via chamadas diretas).
 """
 from __future__ import annotations
-import requests
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
+
 from src.config import MCP_BASE_URL, USER_AGENT
 from src.models import Vaga
 
@@ -16,6 +21,16 @@ HEADERS = {
     "User-Agent": USER_AGENT,
     "Content-Type": "application/json",
 }
+
+# Sessão HTTP com retry automático para erros transitórios
+_retry_strategy = Retry(
+    total=3,
+    backoff_factor=1,
+    status_forcelist=[500, 502, 503, 504],
+)
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(max_retries=_retry_strategy))
+_session.mount("http://", HTTPAdapter(max_retries=_retry_strategy))
 
 
 def _post_mcp(method: str, tool_name: str, arguments: dict) -> dict:
@@ -27,7 +42,7 @@ def _post_mcp(method: str, tool_name: str, arguments: dict) -> dict:
         "params": {"name": tool_name, "arguments": arguments},
     }
     logger.info(f"MCP POST → {tool_name} | args: {arguments}")
-    response = requests.post(MCP_BASE_URL, headers=HEADERS, json=payload, timeout=15)
+    response = _session.post(MCP_BASE_URL, headers=HEADERS, json=payload, timeout=15)
     return response.json()
 
 
@@ -46,7 +61,6 @@ def _extrair_data(resposta: dict) -> list[dict]:
         if isinstance(resultado, dict) and "content" in resultado:
             conteudo = resultado["content"]
             if isinstance(conteudo, list) and conteudo:
-                import json
                 texto = conteudo[0].get("text", "{}")
                 dados = json.loads(texto)
                 if isinstance(dados, dict) and "data" in dados:
@@ -129,7 +143,7 @@ def parse_vagas(data: list[dict]) -> list[Vaga]:
 def extrair_texto_pagina(url: str) -> str | None:
     """Baixa uma página de notícia e extrai o conteúdo textual."""
     try:
-        res = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=5)
+        res = _session.get(url, headers={"User-Agent": USER_AGENT}, timeout=5)
         soup = BeautifulSoup(res.text, "html.parser")
         conteudo = soup.find("div", class_="j-noticia") or soup.find("article")
         if conteudo:

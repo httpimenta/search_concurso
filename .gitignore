@@ -1,5 +1,5 @@
-# Arquivos de ambiente do Streamlit e chaves de API
-.streamlit/
+# Chaves de API (NUNCA versionar)
+.streamlit/secrets.toml
 secrets.toml
 .env
 
@@ -16,5 +16,12 @@ __pycache__/
 .DS_Store
 .pytest_cache/
 
+# Relatórios HTML gerados pela busca diária (saída de execução, específica da máquina)
+resultados/*.html
+resultados/concursos_latest.html
+
 # Ignora versões antigas e legadas do aplicativo
 old/
+
+# Artefatos de ferramentas externas
+.claude_wf_revisao.js

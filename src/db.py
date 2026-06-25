@@ -1,8 +1,13 @@
 """
 Camada de acesso ao banco de dados SQLite.
 Centraliza conexões, migrações e todas as queries do projeto.
+
+Convenção de commits:
+  - Funções de ação unitária (ex: atualizar_inscricao, limpar_cache_ia) fazem commit interno.
+  - Funções de lote/batch NÃO fazem commit — o chamador (pipeline) controla a transação.
 """
 from __future__ import annotations
+import os
 import sqlite3
 import json
 import logging
@@ -10,16 +15,27 @@ from src.config import DB_PATH
 
 logger = logging.getLogger(__name__)
 
+# Conjunto de caminhos já migrados nesta execução (evita re-migrar a cada conexão)
+_migrated_paths: set[str] = set()
+
+
 # ==========================================
 # CONEXÃO
 # ==========================================
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
     """
     Retorna uma conexão SQLite com WAL mode habilitado.
+    Executa migrações automaticamente na primeira conexão por caminho.
     IMPORTANTE: sempre use try/finally para garantir conn.close().
     """
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
+
+    abs_path = os.path.abspath(db_path)
+    if abs_path not in _migrated_paths:
+        migrate(conn)
+        _migrated_paths.add(abs_path)
+
     return conn
 
 
@@ -127,7 +143,7 @@ def salvar_vaga(conn: sqlite3.Connection, link: str, orgao: str, cargo: str,
                 descricao: str, status: str, data_enc: str, salario: str,
                 formacao: str, regiao: str, uf: str,
                 dias_restantes: int = 0, datas_texto: str = "") -> bool:
-    """Insere uma vaga no banco. Retorna True se foi inserida (nova)."""
+    """Insere uma vaga no banco. Retorna True se foi inserida (nova). NÃO faz commit."""
     try:
         conn.execute(
             """INSERT INTO vagas
@@ -151,7 +167,7 @@ def buscar_links_salvos(conn: sqlite3.Connection) -> set[str]:
 
 def atualizar_status_vagas(conn: sqlite3.Connection, links_ativos: list[str],
                            links_encerrados: list[str]) -> None:
-    """Atualiza o status aberto/encerrado das vagas baseado nos dados da API."""
+    """Atualiza o status aberto/encerrado das vagas baseado nos dados da API. NÃO faz commit."""
     c = conn.cursor()
     todos_links = links_ativos + links_encerrados
 
@@ -175,8 +191,6 @@ def atualizar_status_vagas(conn: sqlite3.Connection, links_ativos: list[str],
             f"UPDATE vagas SET status = 'encerrado' WHERE link IN ({placeholders})",
             tuple(links_encerrados),
         )
-
-    conn.commit()
 
 
 def buscar_vagas_abertas(conn: sqlite3.Connection) -> list[dict]:
@@ -213,7 +227,7 @@ def buscar_vagas_sem_texto(conn: sqlite3.Connection) -> list[dict]:
 
 
 def marcar_texto_extraido(conn: sqlite3.Connection, link: str, texto: str | None) -> None:
-    """Marca uma vaga como tendo o texto completo extraído."""
+    """Marca uma vaga como tendo o texto completo extraído. NÃO faz commit."""
     if texto:
         conn.execute(
             "UPDATE vagas SET descricao_resumida = ?, texto_completo = 1 WHERE link = ?",
@@ -249,7 +263,7 @@ def buscar_cache_filtro(conn: sqlite3.Connection, profissoes: list[str]) -> dict
 
 def salvar_analise_filtro(conn: sqlite3.Connection, link: str, profissao: str,
                           compativel: int) -> None:
-    """Salva (ou atualiza) o resultado de uma análise de filtro."""
+    """Salva (ou atualiza) o resultado de uma análise de filtro. NÃO faz commit."""
     conn.execute(
         "INSERT OR REPLACE INTO analises_filtro (link, profissao, compativel) VALUES (?, ?, ?)",
         (link, profissao, compativel),
@@ -258,12 +272,11 @@ def salvar_analise_filtro(conn: sqlite3.Connection, link: str, profissao: str,
 
 def salvar_analises_filtro_batch(conn: sqlite3.Connection,
                                  analises: list[tuple[str, str, int]]) -> None:
-    """Salva múltiplas análises de filtro de uma vez (batch insert)."""
+    """Salva múltiplas análises de filtro de uma vez (batch insert). NÃO faz commit."""
     conn.executemany(
         "INSERT OR REPLACE INTO analises_filtro (link, profissao, compativel) VALUES (?, ?, ?)",
         analises,
     )
-    conn.commit()
 
 
 def buscar_profissoes_salvas(conn: sqlite3.Connection) -> list[str]:
@@ -312,7 +325,7 @@ def salvar_analise_cv(conn: sqlite3.Connection, cv_hash: str, link: str,
                       porcentagem: int, justificativa: str,
                       habilidades_encontradas: list[str],
                       habilidades_faltantes: list[str]) -> None:
-    """Salva o resultado da análise de compatibilidade currículo × vaga."""
+    """Salva o resultado da análise de compatibilidade currículo × vaga. NÃO faz commit."""
     conn.execute(
         """INSERT OR REPLACE INTO analises_cv
            (cv_hash, link, porcentagem, justificativa, habilidades_encontradas, habilidades_faltantes)
@@ -328,7 +341,7 @@ def salvar_analise_cv(conn: sqlite3.Connection, cv_hash: str, link: str,
 # ==========================================
 def salvar_curriculo(conn: sqlite3.Connection, cv_hash: str, nome_arquivo: str,
                      data_upload: str, texto: str) -> None:
-    """Salva um currículo extraído para uso futuro."""
+    """Salva um currículo extraído para uso futuro. Faz commit (ação unitária do usuário)."""
     conn.execute(
         "INSERT OR IGNORE INTO curriculos_salvos (cv_hash, nome_arquivo, data_upload, texto_extraido) VALUES (?, ?, ?, ?)",
         (cv_hash, nome_arquivo, data_upload, texto),
@@ -365,10 +378,9 @@ def buscar_texto_edital(conn: sqlite3.Connection, link: str) -> str | None:
 
 
 def salvar_texto_edital(conn: sqlite3.Connection, link: str, texto: str) -> None:
-    """Salva o texto extraído do edital PDF no banco."""
+    """Salva o texto extraído do edital PDF no banco. NÃO faz commit."""
     try:
         conn.execute("UPDATE vagas SET texto_edital = ? WHERE link = ?", (texto, link))
-        conn.commit()
     except sqlite3.OperationalError:
         pass
 
@@ -377,7 +389,7 @@ def salvar_texto_edital(conn: sqlite3.Connection, link: str, texto: str) -> None
 # INSCRIÇÃO
 # ==========================================
 def atualizar_inscricao(conn: sqlite3.Connection, link: str, inscrito: int) -> None:
-    """Atualiza o status de inscrição de uma vaga."""
+    """Atualiza o status de inscrição de uma vaga. Faz commit (ação unitária do usuário)."""
     conn.execute("UPDATE vagas SET inscrito = ? WHERE link = ?", (inscrito, link))
     conn.commit()
 
@@ -386,7 +398,7 @@ def atualizar_inscricao(conn: sqlite3.Connection, link: str, inscrito: int) -> N
 # LIMPEZA
 # ==========================================
 def limpar_cache_ia(conn: sqlite3.Connection) -> None:
-    """Remove todas as análises da IA (filtro + currículo)."""
+    """Remove todas as análises da IA (filtro + currículo). Faz commit (ação destrutiva)."""
     c = conn.cursor()
     c.execute("DROP TABLE IF EXISTS analises_filtro")
     c.execute("DROP TABLE IF EXISTS analises_cv")
@@ -395,8 +407,8 @@ def limpar_cache_ia(conn: sqlite3.Connection) -> None:
     migrate(conn)
 
 
-def buscar_todas_vagas(conn: sqlite3.Connection) -> list[tuple]:
-    """Retorna todas as vagas para exibição no banco de dados."""
+def buscar_todas_vagas(conn: sqlite3.Connection) -> list[dict]:
+    """Retorna todas as vagas para exibição no banco de dados, como lista de dicts."""
     c = conn.cursor()
     c.execute(
         """SELECT inscrito, orgao, cargo, descricao_resumida, status, link,
@@ -404,4 +416,21 @@ def buscar_todas_vagas(conn: sqlite3.Connection) -> list[tuple]:
                   dias_restantes, datas_texto
            FROM vagas"""
     )
-    return c.fetchall()
+    return [
+        {
+            "inscrito": bool(r[0]),
+            "orgao": r[1] or "",
+            "cargo": r[2] or "",
+            "descricao_resumida": r[3] or "",
+            "status": r[4] or "",
+            "link": r[5] or "",
+            "data_encerramento": r[6] or "Não informada",
+            "salario": r[7] or "",
+            "formacao": r[8] or "",
+            "regiao": r[9] or "",
+            "uf": r[10] or "",
+            "dias_restantes": r[11] if isinstance(r[11], int) else 0,
+            "datas_texto": r[12] or "",
+        }
+        for r in c.fetchall()
+    ]

@@ -1,0 +1,15 @@
+{
+    "ativa": true,
+    "profissoes": [
+        "Service Designer (Júnior)",
+        "Product Designer (Júnior)",
+        "UX/UI Designer (Júnior)",
+        "UI/UX Designer (Júnior)",
+        "UX Researcher (Júnior)"
+    ],
+    "regioes": [
+        ""
+    ],
+    "analisar_curriculo": true,
+    "horario": 9
+}

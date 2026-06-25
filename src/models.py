@@ -101,20 +101,6 @@ class Vaga:
             descricao_resumida=d.get("descricao", "Detalhes disponíveis no edital."),
         )
 
-    @classmethod
-    def from_db_row(cls, row: tuple) -> Vaga:
-        """Constrói uma Vaga a partir de uma linha do banco de dados."""
-        return cls(
-            titulo=row[0] if row[0] else "",
-            cargos_resumo=row[1] if row[1] else "",
-            descricao_resumida=row[2] if row[2] else "",
-            noticia=Noticia(link=row[3] if row[3] else ""),
-            vagas_salario=row[4] if row[4] else "",
-            formacao=row[5] if row[5] else "",
-            regiao=row[6] if row[6] else "",
-            uf=row[7] if row[7] else "",
-        )
-
 
 @dataclass
 class AnaliseCV:

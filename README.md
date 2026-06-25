@@ -5,10 +5,13 @@ Aplicação Streamlit que busca concursos públicos brasileiros via **MCP (Model
 ## ✨ Funcionalidades
 
 - **Busca inteligente** por região, cargo ou cidade
+- **Filtro por senioridade** — Júnior/Pleno/Sênior/Estágio (opcional) por área, inferida pela IA a partir dos requisitos do edital
 - **Pente Fino com IA** — filtra automaticamente cargos irrelevantes
 - **Análise de Currículo** — cruza seu PDF com os editais e dá um ranking de compatibilidade
 - **Cache SQLite** — não reprocessa vagas já analisadas
 - **Extração de editais PDF** — lê editais diretamente dos PDFs oficiais
+- **Busca diária automatizada** — pipeline headless com relatório HTML, ativável pelo próprio app
+- **Agendamento multiplataforma** — detecta o SO e agenda via launchd (macOS), Agendador de Tarefas (Windows) ou cron (Linux)
 - **Laboratório de testes** — inspeciona dados brutos da API e testa extração de CV
 
 ## 📋 Pré-requisitos
@@ -44,6 +47,9 @@ A aplicação abrirá em `http://localhost:8501`.
 ```
 search_concurso/
 ├── app_v2.py                  # Aplicação principal (UI Streamlit)
+├── busca_diaria.py            # Pipeline headless para execução agendada
+├── config_diaria.json         # Configuração da busca diária (profissões, regiões)
+├── setup_schedule.sh          # Script de agendamento via launchd (macOS)
 ├── requirements.txt           # Dependências Python
 ├── .gitignore
 │
@@ -54,7 +60,12 @@ search_concurso/
 │   ├── db.py                  # Banco de dados SQLite (CRUD, migrações)
 │   ├── ai_engine.py           # Motor de IA (Gemini, retry, parsing JSON)
 │   ├── mcp_client.py          # Cliente MCP (comunicação com PCI Concursos)
-│   └── pdf_utils.py           # Extração de texto de PDFs
+│   ├── pdf_utils.py           # Extração de texto de PDFs
+│   ├── pipeline.py            # Pipeline central de negócios (pente fino, filtro, CV)
+│   ├── prompts.py             # Prompts centralizados para o Gemini
+│   ├── report.py              # Gerador de relatórios HTML
+│   ├── scheduler.py           # Agendamento multiplataforma (launchd/schtasks/cron)
+│   └── styles.py              # Componentes CSS para o Streamlit
 │
 ├── pages/                     # Páginas secundárias do Streamlit
 │   ├── 1_Banco_de_Dados.py    # Gestão e exportação de vagas
@@ -67,6 +78,7 @@ search_concurso/
 │
 ├── data/                      # Banco SQLite (gerado automaticamente)
 ├── logs/                      # Logs de execução (gerados automaticamente)
+├── resultados/                # Relatórios HTML da busca diária
 └── old/                       # Versões anteriores (arquivo)
 ```
 
@@ -75,6 +87,57 @@ search_concurso/
 ```bash
 python -m pytest tests/ -v
 ```
+
+## ⏰ Busca Diária Automatizada
+
+O projeto inclui um pipeline headless (`busca_diaria.py`) que roda diariamente e gera um relatório HTML. Os relatórios são salvos em `resultados/`, com `concursos_latest.html` apontando para o mais recente.
+
+### Ativar pelo app (recomendado)
+
+Na **sidebar** do app, seção **🤖 Busca Diária Automática**, há um interruptor para ativar/desativar e escolher o horário. O app detecta o sistema operacional e agenda automaticamente no agendador nativo:
+
+| Sistema | Agendador |
+|---|---|
+| macOS | `launchd` (LaunchAgent em `~/Library/LaunchAgents/`) |
+| Windows | Agendador de Tarefas (`schtasks`) |
+| Linux | `cron` |
+
+### Configuração
+
+O arquivo `config_diaria.json` guarda as preferências (também editável à mão):
+
+```json
+{
+  "ativa": true,
+  "profissoes": ["UX Designer (Júnior)", "Product Designer (Júnior)"],
+  "regioes": ["", "sudeste"],
+  "analisar_curriculo": true,
+  "horario": 9
+}
+```
+
+| Campo | Descrição |
+|---|---|
+| `ativa` | Liga/desliga a busca diária (o script não roda se `false`) |
+| `profissoes` | Áreas para filtrar; senioridade opcional entre parênteses, ex: `"UX Designer (Sênior)"` |
+| `regioes` | Regiões para buscar (`""` = Nacional) |
+| `analisar_curriculo` | Se `true`, cruza o CV mais recente com as vagas |
+| `horario` | Hora do dia para executar (0-23) |
+
+### Executar manualmente
+
+```bash
+python busca_diaria.py
+```
+
+### Agendar por linha de comando (macOS, alternativa)
+
+```bash
+chmod +x setup_schedule.sh
+./setup_schedule.sh
+```
+
+Usa o mesmo `LaunchAgent` que o toggle do app, então não há conflito entre os dois.
 
 ## ⚠️ Segurança
 

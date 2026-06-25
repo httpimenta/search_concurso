@@ -9,11 +9,15 @@ import io
 import os
 
 from src import db
+from src.styles import inject_css, hero, stat_card, section_header, status_badge
 
 st.set_page_config(page_title="Banco de Dados - Caçador IA", page_icon="📚", layout="wide")
+inject_css()
 
-st.title("📚 Banco de Dados de Concursos")
-st.markdown("Gerencie, filtre e acompanhe todas as vagas que o robô já encontrou e salvou.")
+hero(
+    "📚 Banco de Dados de Concursos",
+    "Gerencie, filtre e acompanhe todas as vagas que o robô já encontrou e salvou.",
+)
 
 db_file = db.DB_PATH
 
@@ -23,8 +27,6 @@ if not os.path.exists(db_file):
 
 conn = db.get_connection()
 try:
-    db.migrate(conn)
-
     vagas_bd = db.buscar_todas_vagas(conn)
 
     # Busca as tags/profissões compatíveis
@@ -43,9 +45,26 @@ try:
         st.info("O banco de dados está criado, mas ainda está vazio.")
         st.stop()
 
-    st.write(f"Total de registros armazenados: **{len(vagas_bd)}**")
+    # --- MINI DASHBOARD ---
+    total = len(vagas_bd)
+    abertas = sum(1 for v in vagas_bd if v["status"] == "aberto")
+    encerradas = sum(1 for v in vagas_bd if v["status"] == "encerrado")
+    inscritas = sum(1 for v in vagas_bd if v["inscrito"])
+
+    col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+    with col_s1:
+        stat_card("📊", total, "Total de vagas")
+    with col_s2:
+        stat_card("✅", abertas, "Abertas")
+    with col_s3:
+        stat_card("📦", encerradas, "Encerradas")
+    with col_s4:
+        stat_card("🎯", inscritas, "Inscritas")
+
+    st.markdown("")
 
     # --- FILTROS ---
+    section_header("🔎", "Filtros")
     col_filtros1, col_filtros2, col_filtros3 = st.columns([1, 1, 2])
     with col_filtros1:
         mostrar_inscritos = st.toggle("🎯 Apenas inscritos")
@@ -59,17 +78,14 @@ try:
     # --- TABELA ---
     dados_formatados = []
     for v in vagas_bd:
-        # Colunas: inscrito(0), orgao(1), cargo(2), descricao(3), status(4), link(5),
-        #          data_enc(6), salario(7), formacao(8), regiao(9), uf(10),
-        #          dias_restantes(11), datas_texto(12)
-        inscrito = bool(v[0])
+        inscrito = v["inscrito"]
         if mostrar_inscritos and not inscrito:
             continue
 
-        orgao = v[1] or ""
-        cargo = v[2] or ""
-        descricao = v[3] or ""
-        status = v[4] or ""
+        orgao = v["orgao"]
+        cargo = v["cargo"]
+        descricao = v["descricao_resumida"]
+        status = v["status"]
 
         # Filtra encerrados (padrão: escondidos)
         if status == "encerrado" and not mostrar_encerrados:
@@ -80,14 +96,14 @@ try:
                 and termo_busca.lower() not in descricao.lower():
             continue
 
-        link_vaga = v[5] or ""
-        data_enc = v[6] if len(v) > 6 else "Não informada"
-        salario = v[7] if len(v) > 7 else ""
-        formacao = v[8] if len(v) > 8 else ""
-        regiao = v[9] if len(v) > 9 else ""
-        uf = v[10] if len(v) > 10 else ""
-        dias_rest = v[11] if len(v) > 11 else 0
-        datas_texto = v[12] if len(v) > 12 else ""
+        link_vaga = v["link"]
+        data_enc = v["data_encerramento"]
+        salario = v["salario"]
+        formacao = v["formacao"]
+        regiao = v["regiao"]
+        uf = v["uf"]
+        dias_rest = v["dias_restantes"]
+        datas_texto = v["datas_texto"]
         local = uf.upper() if uf else regiao.upper()
         tags_vaga = ", ".join(tags_por_link.get(link_vaga, [])) or "-"
 
@@ -110,6 +126,8 @@ try:
         st.info("Nenhuma vaga corresponde ao filtro atual.")
         st.stop()
 
+    st.caption(f"Mostrando **{len(dados_formatados)}** vagas com os filtros atuais")
+
     df_editado = st.data_editor(
         dados_formatados,
         column_config={
@@ -117,9 +135,9 @@ try:
             "Link": st.column_config.LinkColumn("Edital"),
             "_link_db": None,
         },
-        disabled=["Órgão", "Cargo/Status", "Áreas Compatíveis", "Resumo/Descrição",
-                   "Link", "Dias Rest.", "Info"],
-        use_container_width=True,
+        disabled=["Órgão", "Cargo/Status", "Local", "Salário", "Áreas Compatíveis",
+                   "Encerramento", "Resumo/Descrição", "Link", "Dias Rest.", "Info"],
+        width="stretch",
         hide_index=True,
     )
 
@@ -131,50 +149,59 @@ try:
             st.toast("Status de inscrição salvo!")
 
     # --- EXPORTAÇÃO ---
-    st.markdown("---")
-    st.subheader("📥 Exportação e Análise Avançada")
+    st.markdown("")
+    section_header("📥", "Exportação e Análise Avançada")
     st.markdown("Baixe seus dados para o Excel ou exporte para uso manual no Gemini.")
 
     col1, col2 = st.columns(2)
 
     with col1:
-        csv_buffer = io.StringIO()
-        fieldnames = ["Inscrito", "Órgão", "Cargo/Status", "Local", "Salário",
-                       "Áreas Compatíveis", "Encerramento", "Resumo/Descrição", "Link"]
-        writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in dados_formatados:
-            row_copy = {k: row[k] for k in fieldnames}
-            row_copy["Inscrito"] = "Sim" if row_copy["Inscrito"] else "Não"
-            writer.writerow(row_copy)
+        with st.container(border=True):
+            st.markdown("#### 📊 Exportar CSV")
+            st.caption("Compatível com Excel, Google Sheets e outros.")
+            csv_buffer = io.StringIO()
+            fieldnames = ["Inscrito", "Órgão", "Cargo/Status", "Local", "Salário",
+                           "Áreas Compatíveis", "Encerramento", "Resumo/Descrição", "Link"]
+            writer = csv.DictWriter(csv_buffer, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in dados_formatados:
+                row_copy = {k: row[k] for k in fieldnames}
+                row_copy["Inscrito"] = "Sim" if row_copy["Inscrito"] else "Não"
+                writer.writerow(row_copy)
 
-        st.download_button(
-            label="📊 Baixar Tabela (CSV / Excel)",
-            data=csv_buffer.getvalue().encode("utf-8-sig"),
-            file_name="vagas_concursos.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
+            st.download_button(
+                label="📊 Baixar Tabela (CSV / Excel)",
+                data=csv_buffer.getvalue().encode("utf-8-sig"),
+                file_name="vagas_concursos.csv",
+                mime="text/csv",
+                width="stretch",
+            )
 
     with col2:
-        vagas_abertas = [
-            {
-                "orgao": v[1], "cargo": v[2], "encerramento": v[6] if len(v) > 6 else "",
-                "salario": v[7] if len(v) > 7 else "",
-                "local": (v[10] or v[9]) if len(v) > 10 else "",
-                "descricao": v[3], "link": v[5],
-            }
-            for v in vagas_bd if v[4] == "aberto"
-        ]
-        st.download_button(
-            label="🤖 Baixar Vagas Abertas (JSON para IA)",
-            data=json.dumps(vagas_abertas, ensure_ascii=False, indent=2),
-            file_name="vagas_abertas_gemini.json",
-            mime="application/json",
-            use_container_width=True,
-        )
+        with st.container(border=True):
+            st.markdown("#### 🤖 Exportar JSON")
+            st.caption("Para uso com o Gemini, ChatGPT ou outros modelos de IA.")
+            vagas_abertas = [
+                {
+                    "orgao": v["orgao"],
+                    "cargo": v["cargo"],
+                    "encerramento": v["data_encerramento"],
+                    "salario": v["salario"],
+                    "local": v["uf"] or v["regiao"],
+                    "descricao": v["descricao_resumida"],
+                    "link": v["link"],
+                }
+                for v in vagas_bd if v["status"] == "aberto"
+            ]
+            st.download_button(
+                label="🤖 Baixar Vagas Abertas (JSON para IA)",
+                data=json.dumps(vagas_abertas, ensure_ascii=False, indent=2),
+                file_name="vagas_abertas_gemini.json",
+                mime="application/json",
+                width="stretch",
+            )
 
-    with st.expander("Passo a passo de como analisar na web"):
+    with st.expander("💡 Passo a passo de como analisar na web"):
         st.markdown("""
         **1.** Baixe o arquivo JSON no botão acima.
         **2.** Acesse [gemini.google.com](https://gemini.google.com).
